@@ -8,13 +8,9 @@ from app.parsers.pdf_parser import is_searchable_pdf, get_pdf_page_count
 from app.parsers.image_preprocessor import preprocess_for_ocr
 import uuid
 
+from app.services.session_store import session_store
+
 router = APIRouter()
-_sessions: dict = {}
-
-
-def set_sessions_store(store: dict):
-    global _sessions
-    _sessions = store
 
 
 class OCRStatusResponse(BaseModel):
@@ -29,9 +25,10 @@ class OCRStatusResponse(BaseModel):
 
 @router.get("/status/{session_id}", response_model=OCRStatusResponse)
 async def get_ocr_status(session_id: str):
-    state = _sessions.get(session_id)
-    if not state:
+    data = await session_store.get(session_id)
+    if not data:
         raise HTTPException(404, f"Session not found: {session_id}")
+    state = AgentState(**data)
 
     is_searchable = None
     page_count = None
@@ -54,9 +51,10 @@ async def get_ocr_status(session_id: str):
 @router.post("/retry/{session_id}")
 async def retry_ocr(session_id: str, background_tasks: BackgroundTasks):
     """Manually re-trigger OCR for a session."""
-    state = _sessions.get(session_id)
-    if not state:
+    data = await session_store.get(session_id)
+    if not data:
         raise HTTPException(404, f"Session not found: {session_id}")
+    state = AgentState(**data)
 
     if state.file_type not in [FileType.PDF, FileType.IMAGE]:
         raise HTTPException(400, "OCR only applies to PDF and image files")
@@ -67,7 +65,7 @@ async def retry_ocr(session_id: str, background_tasks: BackgroundTasks):
 
 async def _run_ocr_background(session_id: str, state: AgentState):
     result = await run_ocr_agent(state)
-    _sessions[session_id] = result
+    await session_store.set(session_id, result.model_dump())
 
 
 @router.post("/preview")

@@ -7,16 +7,10 @@ from app.agents.visualization_agent import run_visualization_agent
 from app.agents.reflection_agent import run_reflection_agent
 from app.services.diff_service import compute_diff, summarize_diff
 
+from app.services.session_store import session_store
+from app.models.state import AgentState
+
 router = APIRouter()
-
-# Shared session store reference (imported from agent route in phase 1)
-# In production use Redis; here we use a module-level dict
-_sessions: dict = {}
-
-
-def set_sessions_store(store: dict):
-    global _sessions
-    _sessions = store
 
 
 # ── Formula ─────────────────────────────────────────────────────────────────
@@ -34,8 +28,8 @@ class FormulaResponse(BaseModel):
 
 @router.post("/formula", response_model=FormulaResponse)
 async def apply_formulas(request: FormulaRequest, background_tasks: BackgroundTasks):
-    state = _sessions.get(request.session_id)
-    if not state:
+    data = await session_store.get(request.session_id)
+    if not data:
         raise HTTPException(404, f"Session not found: {request.session_id}")
 
     background_tasks.add_task(_run_formulas, request.session_id, request.formulas)
@@ -47,10 +41,11 @@ async def apply_formulas(request: FormulaRequest, background_tasks: BackgroundTa
 
 
 async def _run_formulas(session_id: str, formulas: list[str]):
-    state = _sessions.get(session_id)
-    if state:
+    data = await session_store.get(session_id)
+    if data:
+        state = AgentState(**data)
         result = await run_formula_agent(state, formulas)
-        _sessions[session_id] = result
+        await session_store.set(session_id, result.model_dump())
 
 
 # ── Analytics ────────────────────────────────────────────────────────────────
@@ -69,9 +64,10 @@ class AnalyticsResponse(BaseModel):
 
 @router.post("/analytics", response_model=AnalyticsResponse)
 async def ask_analytics(request: AnalyticsRequest):
-    state = _sessions.get(request.session_id)
-    if not state:
+    data = await session_store.get(request.session_id)
+    if not data:
         raise HTTPException(404, f"Session not found: {request.session_id}")
+    state = AgentState(**data)
 
     result = await run_analytics_agent(state, request.question)
     return AnalyticsResponse(
@@ -91,8 +87,8 @@ class ChartRequest(BaseModel):
 
 @router.post("/charts")
 async def generate_charts(request: ChartRequest, background_tasks: BackgroundTasks):
-    state = _sessions.get(request.session_id)
-    if not state:
+    data = await session_store.get(request.session_id)
+    if not data:
         raise HTTPException(404, f"Session not found: {request.session_id}")
 
     background_tasks.add_task(_run_charts, request.session_id, request.charts)
@@ -100,19 +96,21 @@ async def generate_charts(request: ChartRequest, background_tasks: BackgroundTas
 
 
 async def _run_charts(session_id: str, chart_requests: list | None):
-    state = _sessions.get(session_id)
-    if state:
+    data = await session_store.get(session_id)
+    if data:
+        state = AgentState(**data)
         result = await run_visualization_agent(state, chart_requests)
-        _sessions[session_id] = result
+        await session_store.set(session_id, result.model_dump())
 
 
 # ── Reflection ───────────────────────────────────────────────────────────────
 
 @router.post("/reflect")
 async def run_reflection(session_id: str):
-    state = _sessions.get(session_id)
-    if not state:
+    data = await session_store.get(session_id)
+    if not data:
         raise HTTPException(404, f"Session not found: {session_id}")
+    state = AgentState(**data)
 
     _, report = await run_reflection_agent(state)
     return {
@@ -125,9 +123,10 @@ async def run_reflection(session_id: str):
 
 @router.get("/diff/{session_id}")
 async def get_diff(session_id: str, limit: int = 100):
-    state = _sessions.get(session_id)
-    if not state:
+    data = await session_store.get(session_id)
+    if not data:
         raise HTTPException(404, f"Session not found: {session_id}")
+    state = AgentState(**data)
 
     if not state.extracted_data or not state.cleaned_data:
         return {"session_id": session_id, "diff": [], "summary": {}}

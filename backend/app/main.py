@@ -13,7 +13,7 @@ from app.services.memory_service import init_memory_db
 from app.api.routes import upload, workspace, ws
 from app.api.routes.agent   import router as agent_router
 from app.api.routes.phase2  import router as phase2_router
-from app.api.routes.phase3  import router as phase3_router, set_sessions_store as set_p3
+from app.api.routes.phase3  import router as phase3_router
 from app.api.routes.phase4  import router as phase4_router
 from app.api.routes.health  import router as health_router
 from app.api.routes.download import router as download_router   # Phase 5
@@ -32,8 +32,7 @@ async def lifespan(app: FastAPI):
     for sub in ["incoming","processing","extracted","cleaned",
                 "excels","charts","reports","logs","memory","temp"]:
         (settings.workspace_path / sub).mkdir(exist_ok=True)
-    from app.services.session_store import session_store
-    set_p3(session_store)
+    # Session store is now imported directly in the routers.
     if settings.sentry_dsn:
         import sentry_sdk
         sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.2)
